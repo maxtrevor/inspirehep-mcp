@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run unit tests
+        run: uv run pytest tests/test_utils.py tests/test_cache.py tests/test_errors.py tests/test_config.py -v
+
+      - name: Run integration tests
+        run: uv run pytest tests/test_tools_integration.py -v
+
+      - name: Run tests with coverage
+        run: uv run pytest tests/ --cov=inspirehep_mcp --cov-report=term-missing --cov-fail-under=80
