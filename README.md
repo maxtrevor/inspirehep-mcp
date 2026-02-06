@@ -2,15 +2,28 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that integrates [InspireHEP](https://inspirehep.net/) high-energy physics literature with LLMs. Search papers, explore citations, retrieve author metrics, and generate formatted references.
 
-## Quick Start
+## Installation
 
 ```bash
-# Install
-uv sync
+# Using pip
+pip install inspirehep-mcp
 
-# Run the server
+# Or run directly with uvx (no install needed)
+uvx inspirehep-mcp
+```
+
+<details>
+<summary>Install from source</summary>
+
+```bash
+git clone https://github.com/MohamedElashri/inspirehep-mcp.git
+cd inspirehep-mcp
+uv sync
 uv run inspirehep-mcp
 ```
+</details>
+
+## Integration
 
 ### Claude Desktop / Cursor / Windsurf
 
@@ -20,8 +33,75 @@ Add to your MCP client config:
 {
   "mcpServers": {
     "inspirehep": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/inspirehep-mcp", "run", "inspirehep-mcp"]
+      "command": "uvx",
+      "args": ["inspirehep-mcp"]
+    }
+  }
+}
+```
+
+### Claude Code
+
+**Option A: Using the CLI**
+
+```bash
+# Global scope (available across all projects)
+claude mcp add --scope user inspirehep -- uvx inspirehep-mcp
+
+# Project scope (shared via .mcp.json, checked into source control)
+claude mcp add --scope project inspirehep -- uvx inspirehep-mcp
+```
+
+**Option B: Manual configuration**
+
+For global scope, add to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "inspirehep": {
+      "command": "uvx",
+      "args": ["inspirehep-mcp"]
+    }
+  }
+}
+```
+
+For project scope, create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "inspirehep": {
+      "command": "uvx",
+      "args": ["inspirehep-mcp"]
+    }
+  }
+}
+```
+
+### Gemini CLI
+
+**Option A: Using the CLI**
+
+```bash
+# Project scope (default)
+gemini mcp add inspirehep uvx inspirehep-mcp
+
+# User/global scope
+gemini mcp add -s user inspirehep uvx inspirehep-mcp
+```
+
+**Option B: Manual configuration**
+
+Add to `~/.gemini/settings.json` (user scope) or `.gemini/settings.json` (project scope):
+
+```json
+{
+  "mcpServers": {
+    "inspirehep": {
+      "command": "uvx",
+      "args": ["inspirehep-mcp"]
     }
   }
 }
