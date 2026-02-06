@@ -6,7 +6,10 @@ from mcp.server.fastmcp import FastMCP
 
 from .api_client import InspireHEPClient
 from .tools import get_author_papers as _get_author_papers
+from .tools import get_citations as _get_citations
 from .tools import get_paper_details as _get_paper_details
+from .tools import get_references as _get_references
+from .tools import search_by_collaboration as _search_by_collaboration
 from .tools import search_papers as _search_papers
 
 logger = logging.getLogger(__name__)
@@ -99,6 +102,73 @@ async def get_author_papers(
     return await _get_author_papers(
         api_client, author_name=author_name, author_id=author_id, sort=sort, size=size
     )
+
+
+@mcp.tool()
+async def get_citations(
+    inspire_id: str,
+    direction: str = "citing",
+    size: int = 50,
+) -> str:
+    """Retrieve citation graph data for a paper.
+
+    Args:
+        inspire_id: InspireHEP record ID (numeric).
+        direction: "citing" (papers that cite this) or "cited_by" (papers this cites).
+        size: Number of results to return (1–250, default 50).
+
+    Returns citation list with metadata, total count, and a
+    year-by-year citation timeline.
+    """
+    return await _get_citations(
+        api_client, inspire_id=inspire_id, direction=direction, size=size
+    )
+
+
+@mcp.tool()
+async def search_by_collaboration(
+    collaboration_name: str,
+    sort: str = "mostrecent",
+    size: int = 20,
+    year: int | None = None,
+) -> str:
+    """Find publications from a specific experimental collaboration.
+
+    Handles common name variations (e.g. "lhcb" → "LHCb").
+
+    Args:
+        collaboration_name: Collaboration name (e.g. "ATLAS", "CMS", "LHCb", "Belle-II").
+        sort: Sort order — "mostrecent" or "mostcited".
+        size: Number of results to return (1–100, default 20).
+        year: Optional year filter (e.g. 2024).
+
+    Returns publication list, year distribution, total citations,
+    and top-cited papers from the returned set.
+    """
+    return await _search_by_collaboration(
+        api_client,
+        collaboration_name=collaboration_name,
+        sort=sort,
+        size=size,
+        year=year,
+    )
+
+
+@mcp.tool()
+async def get_references(
+    inspire_id: str,
+    format: str = "bibtex",
+) -> str:
+    """Generate a formatted reference list for a paper.
+
+    Args:
+        inspire_id: InspireHEP record ID (numeric).
+        format: Output format — "bibtex", "json", "latex-us", or "latex-eu".
+
+    Returns the reference list in the requested format along with
+    total reference count and paper title.
+    """
+    return await _get_references(api_client, inspire_id=inspire_id, format=format)
 
 
 # ------------------------------------------------------------------

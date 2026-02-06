@@ -1,7 +1,8 @@
-"""Tier 1 MCP tools for InspireHEP literature discovery."""
+"""MCP tools for InspireHEP literature discovery and analysis."""
 
 import json
 import logging
+from collections import Counter
 from typing import Any
 
 from .api_client import InspireHEPClient
@@ -359,5 +360,347 @@ async def get_author_papers(
             "average_citations": round(total_citations / len(papers), 1) if papers else 0,
         },
         "papers": papers,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ======================================================================
+# get_citations
+# ======================================================================
+
+async def get_citations(
+    client: InspireHEPClient,
+    inspire_id: str,
+    direction: str = "citing",
+    size: int = 50,
+) -> str:
+    """Retrieve citation graph data for a paper.
+
+    Args:
+        client: The shared API client.
+        inspire_id: InspireHEP record ID.
+        direction: "citing" (papers that cite this) or "cited_by" (papers this cites).
+        size: Number of results (1-250).
+
+    Returns:
+        JSON string with citation list, total count, and year-by-year timeline.
+    """
+    valid_directions = {"citing", "cited_by"}
+    if direction not in valid_directions:
+        return _format_error(
+            ValueError(f"Invalid direction '{direction}'. Must be one of: {', '.join(valid_directions)}")
+        )
+
+    try:
+        nid = normalize_inspire_id(inspire_id)
+    except InvalidIdentifierError as exc:
+        return _format_error(exc)
+
+    size = max(1, min(size, 250))
+
+    try:
+        if direction == "citing":
+            # Papers that cite this paper
+            raw = await client.search_literature(
+                f"refersto:{nid}", sort="mostrecent", size=size
+            )
+        else:
+            # Papers that this paper cites (its references)
+            raw = await client.search_literature(
+                f"citedby:recid:{nid}", sort="mostrecent", size=size
+            )
+    except InspireHEPError as exc:
+        return _format_error(exc)
+
+    hits = raw.get("hits", {})
+    total = hits.get("total", 0)
+    records = hits.get("hits", [])
+
+    papers = [parse_paper_metadata(r) for r in records]
+
+    # Build citation timeline (year → count)
+    year_counts: Counter[str] = Counter()
+    for p in papers:
+        date = p.get("date", "")
+        year = date[:4] if date and len(date) >= 4 else "unknown"
+        year_counts[year] += 1
+    timeline = dict(sorted(year_counts.items()))
+
+    result: dict[str, Any] = {
+        "inspire_id": nid,
+        "direction": direction,
+        "total_citations": total,
+        "returned": len(papers),
+        "timeline": timeline,
+        "papers": papers,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ======================================================================
+# search_by_collaboration
+# ======================================================================
+
+# Common collaboration name aliases
+_COLLABORATION_ALIASES: dict[str, str] = {
+    "lhcb": "LHCb",
+    "atlas": "ATLAS",
+    "cms": "CMS",
+    "alice": "ALICE",
+    "belle": "Belle",
+    "belle ii": "Belle-II",
+    "belle-ii": "Belle-II",
+    "belle2": "Belle-II",
+    "babar": "BaBar",
+    "daya bay": "Daya Bay",
+    "t2k": "T2K",
+    "nova": "NOvA",
+    "super-kamiokande": "Super-Kamiokande",
+    "superkamiokande": "Super-Kamiokande",
+    "super-k": "Super-Kamiokande",
+    "planck": "Planck",
+    "ligo": "LIGO Scientific",
+    "virgo": "VIRGO",
+    "xenon": "XENON",
+    "darkside": "DarkSide",
+    "fermi-lat": "Fermi-LAT",
+    "ice cube": "IceCube",
+    "icecube": "IceCube",
+    "star": "STAR",
+    "phenix": "PHENIX",
+}
+
+
+def _normalize_collaboration(name: str) -> str:
+    """Normalize collaboration name using known aliases."""
+    return _COLLABORATION_ALIASES.get(name.lower().strip(), name.strip())
+
+
+async def search_by_collaboration(
+    client: InspireHEPClient,
+    collaboration_name: str,
+    sort: str = "mostrecent",
+    size: int = 20,
+    year: int | None = None,
+) -> str:
+    """Find publications from a specific experimental collaboration.
+
+    Args:
+        client: The shared API client.
+        collaboration_name: Collaboration name (e.g. "ATLAS", "CMS", "LHCb").
+        sort: One of "mostrecent", "mostcited".
+        size: Number of results (1-100).
+        year: Optional year filter.
+
+    Returns:
+        JSON string with collaboration publications, stats, and key papers.
+    """
+    valid_sorts = {"mostrecent", "mostcited"}
+    if sort not in valid_sorts:
+        return _format_error(
+            ValueError(f"Invalid sort option '{sort}'. Must be one of: {', '.join(valid_sorts)}")
+        )
+
+    size = max(1, min(size, 100))
+    collab = _normalize_collaboration(collaboration_name)
+
+    # Build query
+    query = f"collaboration:{collab}"
+    if year is not None:
+        query += f" and date {year}"
+
+    try:
+        raw = await client.search_literature(query, sort=sort, size=size)
+    except InspireHEPError as exc:
+        return _format_error(exc)
+
+    hits = raw.get("hits", {})
+    total = hits.get("total", 0)
+    records = hits.get("hits", [])
+
+    papers = [parse_paper_metadata(r) for r in records]
+
+    # Identify top-cited papers from the returned set
+    top_cited = sorted(papers, key=lambda p: p.get("citation_count", 0), reverse=True)[:5]
+
+    # Publication year distribution from returned papers
+    year_counts: Counter[str] = Counter()
+    for p in papers:
+        date = p.get("date", "")
+        y = date[:4] if date and len(date) >= 4 else "unknown"
+        year_counts[y] += 1
+
+    result: dict[str, Any] = {
+        "collaboration": collab,
+        "query": query,
+        "total_publications": total,
+        "returned": len(papers),
+        "sort": sort,
+        "year_filter": year,
+        "statistics": {
+            "year_distribution": dict(sorted(year_counts.items())),
+            "total_citations": sum(p.get("citation_count", 0) for p in papers),
+        },
+        "top_cited_papers": [
+            {
+                "title": p["title"],
+                "inspire_id": p["inspire_id"],
+                "citation_count": p["citation_count"],
+                "date": p["date"],
+            }
+            for p in top_cited
+        ],
+        "papers": papers,
+    }
+    return json.dumps(result, indent=2)
+
+
+# ======================================================================
+# get_references
+# ======================================================================
+
+async def get_references(
+    client: InspireHEPClient,
+    inspire_id: str,
+    format: str = "bibtex",
+    style: str | None = None,
+) -> str:
+    """Generate a formatted reference list for a paper.
+
+    Args:
+        client: The shared API client.
+        inspire_id: InspireHEP record ID.
+        format: Output format — "bibtex", "json", or "latex-us" / "latex-eu".
+        style: Citation style hint (currently unused, reserved for future).
+
+    Returns:
+        JSON string containing the formatted references and metadata.
+    """
+    valid_formats = {"bibtex", "json", "latex-us", "latex-eu"}
+    if format not in valid_formats:
+        return _format_error(
+            ValueError(f"Invalid format '{format}'. Must be one of: {', '.join(sorted(valid_formats))}")
+        )
+
+    try:
+        nid = normalize_inspire_id(inspire_id)
+    except InvalidIdentifierError as exc:
+        return _format_error(exc)
+
+    # First, get the paper's references as JSON to know what we're formatting
+    try:
+        record = await client.get_literature_record(nid, fields="references,titles")
+    except NotFoundError:
+        return _format_error(NotFoundError("paper", nid))
+    except InspireHEPError as exc:
+        return _format_error(exc)
+
+    meta = record.get("metadata", {})
+    refs = meta.get("references", [])
+    title = ""
+    titles = meta.get("titles", [])
+    if titles:
+        title = titles[0].get("title", "")
+
+    if not refs:
+        result: dict[str, Any] = {
+            "inspire_id": nid,
+            "paper_title": title,
+            "total_references": 0,
+            "format": format,
+            "references": "",
+            "note": "This paper has no references in InspireHEP.",
+        }
+        return json.dumps(result, indent=2)
+
+    # Extract reference record IDs
+    ref_recids: list[str] = []
+    for ref in refs:
+        rec_ref = ref.get("record", {}).get("$ref", "")
+        if rec_ref:
+            # Extract recid from URL like https://inspirehep.net/api/literature/84483
+            parts = rec_ref.rstrip("/").split("/")
+            if parts:
+                ref_recids.append(parts[-1])
+
+    if format == "json":
+        # Return structured JSON reference data
+        ref_data: list[dict[str, Any]] = []
+        for ref in refs:
+            entry: dict[str, Any] = {}
+            refinfo = ref.get("reference", {})
+            rec_ref = ref.get("record", {}).get("$ref", "")
+
+            # Extract recid
+            if rec_ref:
+                parts = rec_ref.rstrip("/").split("/")
+                entry["inspire_id"] = parts[-1] if parts else None
+                entry["inspire_url"] = f"https://inspirehep.net/literature/{parts[-1]}"
+
+            # Publication info from reference
+            pub = refinfo.get("publication_info", {})
+            if pub:
+                entry["journal_title"] = pub.get("journal_title", "")
+                entry["journal_volume"] = pub.get("journal_volume", "")
+                entry["page_start"] = pub.get("page_start", "")
+                entry["year"] = pub.get("year")
+
+            # Authors
+            authors = refinfo.get("authors", [])
+            if authors:
+                entry["authors"] = [a.get("full_name", "") for a in authors[:5]]
+
+            # Title
+            ref_title = refinfo.get("title", {})
+            if isinstance(ref_title, dict):
+                entry["title"] = ref_title.get("title", "")
+            elif isinstance(ref_title, str):
+                entry["title"] = ref_title
+
+            # arXiv
+            arxiv = refinfo.get("arxiv_eprint", "")
+            if arxiv:
+                entry["arxiv_id"] = arxiv
+
+            # DOI
+            dois = refinfo.get("dois", [])
+            if dois:
+                entry["doi"] = dois[0]
+
+            if entry:
+                ref_data.append(entry)
+
+        result = {
+            "inspire_id": nid,
+            "paper_title": title,
+            "total_references": len(refs),
+            "format": "json",
+            "references": ref_data,
+        }
+        return json.dumps(result, indent=2)
+
+    # For bibtex / latex formats, fetch from the API for each referenced paper
+    # Use the API's built-in formatting by fetching BibTeX for the paper's references
+    # Strategy: fetch BibTeX for each referenced record (batch via search query)
+    if ref_recids:
+        # Build a query to get all references at once, then fetch formatted output
+        recid_query = " or ".join(f"recid:{rid}" for rid in ref_recids[:250])
+        try:
+            formatted_text = await client.get_text(
+                "/literature",
+                params={"q": recid_query, "size": min(len(ref_recids), 250), "format": format},
+            )
+        except InspireHEPError as exc:
+            return _format_error(exc)
+    else:
+        formatted_text = "% No resolvable references found."
+
+    result = {
+        "inspire_id": nid,
+        "paper_title": title,
+        "total_references": len(refs),
+        "resolvable_references": len(ref_recids),
+        "format": format,
+        "references": formatted_text,
     }
     return json.dumps(result, indent=2)

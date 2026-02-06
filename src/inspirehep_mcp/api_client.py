@@ -156,6 +156,47 @@ class InspireHEPClient:
         """Perform a cached GET request."""
         return await self._request("GET", path, params=params, use_cache=use_cache)
 
+    async def get_text(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> str:
+        """Perform a GET request and return the raw response text.
+
+        Used for non-JSON endpoints like BibTeX and LaTeX formats.
+        Uses Accept: */* to avoid the default JSON Accept header.
+        """
+        cache_key = f"GET_TEXT:{path}:{sorted((params or {}).items())}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        await self._wait_for_rate_limit()
+
+        client = await self._get_client()
+        try:
+            response = await client.request(
+                "GET", path, params=params, headers={"Accept": "*/*"}
+            )
+        except httpx.TimeoutException as exc:
+            raise APIError("Request timed out", details=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise APIError("HTTP request failed", details=str(exc)) from exc
+
+        if response.status_code == 404:
+            raise NotFoundError("resource", path)
+        if response.status_code >= 400:
+            raise APIError(
+                "API request failed",
+                status_code=response.status_code,
+                details=response.text[:500],
+            )
+
+        text = response.text
+        self._cache.set(cache_key, text)
+        return text
+
     # ------------------------------------------------------------------
     # Literature endpoints
     # ------------------------------------------------------------------
