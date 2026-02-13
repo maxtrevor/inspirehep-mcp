@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "inspirehep": {
+      "type": "stdio",
+      "command": "/usr/local/bin/inspirehep-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
