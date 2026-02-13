@@ -15,14 +15,10 @@ from inspirehep_mcp.tools import get_bibtex
 async def main():
     """Fetch BibTeX citations for all DOIs."""
     dois = [
-        "10.1038/nature09466",
-        "10.1126/science.1233232",
-        "10.1126/science.1203264",
-        "10.1103/PhysRevD.82.101301",
-        "10.1088/0264-9381/26/6/063001",
-        "10.1016/j.crhy.2013.01.008",
-        "10.1086/345812",
-        "10.1103/PhysRevD.92.084040",
+        "10.1088/0264-9381/34/1/015001",
+        "10.1088/0264-9381/28/12/125023",
+        "10.1088/0264-9381/32/2/024001",
+        "10.1103/PhysRevD.23.1693",
     ]
 
     client = InspireHEPClient()
