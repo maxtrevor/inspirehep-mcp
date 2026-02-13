@@ -704,3 +704,85 @@ async def get_references(
         "references": formatted_text,
     }
     return json.dumps(result, indent=2)
+
+
+# ======================================================================
+# get_bibtex
+# ======================================================================
+
+async def get_bibtex(
+    client: InspireHEPClient,
+    inspire_id: str | None = None,
+    arxiv_id: str | None = None,
+    doi: str | None = None,
+) -> str:
+    """Retrieve the BibTeX citation entry for a specific paper.
+
+    At least one identifier must be provided. The lookup order is:
+    inspire_id > arxiv_id > doi.
+
+    Args:
+        client: The shared API client.
+        inspire_id: InspireHEP record ID.
+        arxiv_id: arXiv identifier (any format).
+        doi: Digital Object Identifier (any format).
+
+    Returns:
+        JSON string containing the BibTeX citation text and paper metadata.
+    """
+    if not any([inspire_id, arxiv_id, doi]):
+        return _format_error(
+            ValueError("At least one identifier must be provided (inspire_id, arxiv_id, or doi)")
+        )
+
+    # Resolve the identifier to an API path
+    try:
+        if inspire_id:
+            nid = normalize_inspire_id(inspire_id)
+            path = f"/literature/{nid}"
+        elif arxiv_id:
+            nid = normalize_arxiv_id(arxiv_id)
+            path = f"/arxiv/{nid}"
+        else:
+            assert doi is not None
+            nid = normalize_doi(doi)
+            path = f"/doi/{nid}"
+    except InvalidIdentifierError as exc:
+        return _format_error(exc)
+
+    # Fetch the BibTeX formatted citation
+    try:
+        bibtex_text = await client.get_text(path, params={"format": "bibtex"})
+    except NotFoundError:
+        identifier = inspire_id or arxiv_id or doi
+        return _format_error(NotFoundError("paper", str(identifier)))
+    except InspireHEPError as exc:
+        return _format_error(exc)
+
+    # Also fetch basic metadata for context
+    try:
+        if inspire_id:
+            record = await client.get_literature_record(nid, fields="titles,dois,arxiv_eprints")
+        elif arxiv_id:
+            record = await client.get_literature_by_arxiv(nid, fields="titles,dois,arxiv_eprints")
+        else:
+            assert doi is not None
+            record = await client.get_literature_by_doi(nid, fields="titles,dois,arxiv_eprints")
+        meta = record.get("metadata", {})
+        title = ""
+        titles = meta.get("titles", [])
+        if titles:
+            title = titles[0].get("title", "")
+        record_id = str(record.get("id", ""))
+    except InspireHEPError:
+        # Metadata fetch is best-effort; BibTeX is the important part
+        title = ""
+        record_id = ""
+
+    result: dict[str, Any] = {
+        "inspire_id": record_id,
+        "title": title,
+        "identifier_used": inspire_id or arxiv_id or doi,
+        "bibtex": bibtex_text.strip(),
+    }
+    return json.dumps(result, indent=2)

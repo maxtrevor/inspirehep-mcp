@@ -14,6 +14,7 @@ import pytest_asyncio
 from inspirehep_mcp.api_client import InspireHEPClient
 from inspirehep_mcp.tools import (
     get_author_papers,
+    get_bibtex,
     get_citations,
     get_paper_details,
     get_references,
@@ -287,3 +288,49 @@ class TestGetReferences:
             await get_references(client, inspire_id="abc")
         )
         assert "error" in result
+
+
+# ======================================================================
+# get_bibtex
+# ======================================================================
+
+
+class TestGetBibtex:
+    async def test_by_doi(self, client):
+        result = json.loads(
+            await get_bibtex(client, doi="10.1016/0375-9474(74)90528-4")
+        )
+        assert "bibtex" in result
+        assert "@" in result["bibtex"]  # BibTeX entries start with @
+        assert result["identifier_used"] == "10.1016/0375-9474(74)90528-4"
+
+    async def test_by_inspire_id(self, client):
+        result = json.loads(await get_bibtex(client, inspire_id="3456"))
+        assert "bibtex" in result
+        assert "@" in result["bibtex"]
+        assert result["inspire_id"] == "3456"
+
+    async def test_by_arxiv_id(self, client):
+        result = json.loads(await get_bibtex(client, arxiv_id="1207.7214"))
+        assert "bibtex" in result
+        assert "@" in result["bibtex"]
+
+    async def test_no_identifier(self, client):
+        result = json.loads(await get_bibtex(client))
+        assert "error" in result
+
+    async def test_not_found(self, client):
+        result = json.loads(
+            await get_bibtex(client, inspire_id="99999999999")
+        )
+        assert "error" in result
+
+    async def test_invalid_doi(self, client):
+        result = json.loads(await get_bibtex(client, doi="not-a-doi"))
+        assert "error" in result
+
+    async def test_has_title(self, client):
+        result = json.loads(
+            await get_bibtex(client, doi="10.1016/0370-2693(73)90494-2")
+        )
+        assert result.get("title", "") != ""
